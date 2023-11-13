@@ -1,72 +1,75 @@
-import re
-from typing import Union
+""" Main module. """
 
-from globals import *
+import threading
+from typing import Generic, TypeVar
+
+from evaluator import Evaluator
+
+T = TypeVar("T")
 
 
-class Evaluator:
+class MutexVar(Generic[T]):
+    """ Wraps some variable into mutex variable.
+        I.e. r/w variable with lock for eliminating race condition.
+    """
+
+    def __init__(self, inner: T):
+        self.lock = threading.Lock()
+        self.inner = inner
+
+    @property
+    def inner(self) -> T:
+        """ Get inner variable using lock. """
+        with self.lock:
+            return self.__inner
+
+    @inner.setter
+    def inner(self, new_inner: T) -> None:
+        with self.lock:
+            self.__inner = new_inner
+
+
+class MainApp(threading.Thread):
+    """ Class wiht main application. """
+
     def __init__(self):
-        pass
+        super().__init__()
+        self.daemon = True
 
-    def evaluate(self, source: str) -> ReturnableTypes:
-        source = source.replace(" ", "")
-        source = self.evaluate_brackets(source)
+        self.evaluator = Evaluator()
+        self.eval_th = threading.Thread(target=self.__eval, daemon=True)
+        self.eval_event = threading.Event()
+        self.eval_event.clear()
 
-        splitted = SPLIT_REGEX.split(source)
-        ops_query = sorted(
-            splitted[1::2],
-            key=lambda op: OPS_PRECEDENCE[op],
-            reverse=True
-        )
+        self.evaled_source = MutexVar("")
+        self.source = MutexVar("")
+        self.running = True
 
-        for op in ops_query:
-            idx = splitted.index(op)
+    def run(self):
+        self.eval_th.start()
+        while self.running:
+            self.source.inner = input("> ")
+            self.eval_event.set()
+            self.eval_event.clear()
+            self.eval_event.wait()
+            print(f"\n    {self.evaled_source.inner}\n")
 
-            lhs, rhs = splitted[idx - 1:idx + 2:2]
-            print(lhs, rhs)
+    def __eval(self):
+        while True:
+            self.eval_event.wait()
 
-            lhs, rhs, return_type = self.cast_to_max(lhs, rhs)
-
-            splitted[idx - 1:idx + 2] = (
-                str(getattr(return_type, OPS_DUNDERS[op])(lhs, rhs)),
-            )
-
-        return splitted[0]
-
-    def cast_from_str(self, source: str):
-        """ Cast source to numerical type accordingly to CAST_PRECEDENCE. """
-        for cast_type in CAST_PRECEDENCE:
             try:
-                if cast_type == bool and source not in {"True", "False"}:
-                    continue
-                return cast_type(source)
-            except ValueError:
-                pass
+                self.evaled_source.inner = self.evaluator.evaluate(
+                    self.source.inner
+                )
+            except ValueError as exc:
+                self.evaled_source.inner = f"error: {exc}"
 
-        raise ValueError(
-            "Cannot cast given str to supported types: "
-            f"{CAST_PRECEDENCE.keys()}"
-        )
-
-    def cast_to_max(self, lhs: str, rhs: str) -> tuple:
-        """ Cast lhs and rhs to one type accordingly to CAST_PRECEDENCE,
-            so that return type will be type that has max precedence of 
-            casted lhs and rhs.
-        """
-        type_lhs = type(self.cast_from_str(lhs))
-        type_rhs = type(self.cast_from_str(rhs))
-
-        return_type = max(
-            type_lhs, type_rhs, key=lambda arg: CAST_PRECEDENCE[arg]
-        )
-
-        return (return_type(lhs), return_type(rhs), return_type)
-
-    def evaluate_brackets(self, source: str) -> str:
-        """ Evaluate value inside the brackets of source. """
-        ret =  BRACKETS_REGEX.sub(lambda m: self.evaluate(m.group(1)), source)
-        return ret
+            self.eval_event.set()
+            self.eval_event.clear()
 
 
-evaluator = Evaluator()
-print(evaluator.evaluate("2.71 * 2**0.5"))
+if __name__ == "__main__":
+    app = MainApp()
+    app.start()
+    app.join()
