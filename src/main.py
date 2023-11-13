@@ -1,52 +1,72 @@
 import re
-from itertools import pairwise
+from typing import Union
 
-OPERATORS_PRECEDENCE = {
-    r"\|\|": 0,
-    "&&": 1,
-    "!": 2,
-    "[<(<=)>(>=)(!=)(==)]": 3,
-    r"\|": 4,
-    r"\^": 5,
-    "&": 6,
-    "[(<<)(>>)]": 7,
-    "([+-])": 8,
-    "([*/(//)%])": 9,
-    r"\*\*": 11,
-
-}
-
-OPERATOR_TO_DUNEDER = {
-    "+": "__add__",
-    "-": "__sub__",
-    "*": "__mul__",
-}
+from globals import *
 
 
-def evaluate(lhs: str, rhs: str, operator: str) -> int:
-    for regex in OPERATORS_PRECEDENCE:
-        splitted = re.split(regex, lhs)
-        if len(splitted) > 1:
-            lhs = splitted[0]
-            for op, r in zip(splitted[1::2], splitted[2::2]):
-                print(lhs, r, op)
-                lhs = evaluate(lhs, r, op)
-                print(lhs, type(lhs))
+class Evaluator:
+    def __init__(self):
+        pass
 
-    for regex in OPERATORS_PRECEDENCE:
-        splitted = re.split(regex, rhs)
-        if len(splitted) > 1:
-            rhs = splitted[0]
-            for op, r in zip(splitted[1::2], splitted[2::2]):
-                print(rhs, r, op)
-                rhs = evaluate(rhs, r, op)
-                print(rhs, type(rhs))
+    def evaluate(self, source: str) -> ReturnableTypes:
+        source = source.replace(" ", "")
+        source = self.evaluate_brackets(source)
 
-    print(operator)
-    return str(getattr(int, OPERATOR_TO_DUNEDER[operator])(int(lhs), int(rhs)))
+        splitted = SPLIT_REGEX.split(source)
+        ops_query = sorted(
+            splitted[1::2],
+            key=lambda op: OPS_PRECEDENCE[op],
+            reverse=True
+        )
+
+        for op in ops_query:
+            idx = splitted.index(op)
+
+            lhs, rhs = splitted[idx - 1:idx + 2:2]
+            print(lhs, rhs)
+
+            lhs, rhs, return_type = self.cast_to_max(lhs, rhs)
+
+            splitted[idx - 1:idx + 2] = (
+                str(getattr(return_type, OPS_DUNDERS[op])(lhs, rhs)),
+            )
+
+        return splitted[0]
+
+    def cast_from_str(self, source: str):
+        """ Cast source to numerical type accordingly to CAST_PRECEDENCE. """
+        for cast_type in CAST_PRECEDENCE:
+            try:
+                if cast_type == bool and source not in {"True", "False"}:
+                    continue
+                return cast_type(source)
+            except ValueError:
+                pass
+
+        raise ValueError(
+            "Cannot cast given str to supported types: "
+            f"{CAST_PRECEDENCE.keys()}"
+        )
+
+    def cast_to_max(self, lhs: str, rhs: str) -> tuple:
+        """ Cast lhs and rhs to one type accordingly to CAST_PRECEDENCE,
+            so that return type will be type that has max precedence of 
+            casted lhs and rhs.
+        """
+        type_lhs = type(self.cast_from_str(lhs))
+        type_rhs = type(self.cast_from_str(rhs))
+
+        return_type = max(
+            type_lhs, type_rhs, key=lambda arg: CAST_PRECEDENCE[arg]
+        )
+
+        return (return_type(lhs), return_type(rhs), return_type)
+
+    def evaluate_brackets(self, source: str) -> str:
+        """ Evaluate value inside the brackets of source. """
+        ret =  BRACKETS_REGEX.sub(lambda m: self.evaluate(m.group(1)), source)
+        return ret
 
 
-queries = ["11", "666 + 11 - 2"]
-queries[1] = queries[1].replace(" ", "")
-
-print(evaluate(queries[0], queries[1], "*"))
+evaluator = Evaluator()
+print(evaluator.evaluate("2.71 * 2**0.5"))
